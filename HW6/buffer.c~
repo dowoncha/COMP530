@@ -1,0 +1,117 @@
+/*
+ * \file buffer.c
+ *
+ * \author Dowon Cha
+ * 
+ * I pledge I did not copy this code
+ */
+
+#include "buffer.h"
+
+/**
+ *  Create an anonymous memory file and return the pointer to it
+ */
+static void* create_mmap(size_t size)
+{
+  int protections = PROT_READ | PROT_WRITE;  //Can read and write
+  int flags = MAP_SHARED | MAP_ANONYMOUS;    //Shared b/w processes and not mapped to a file
+
+  void* address = mmap(NULL, size, protections, flags, -1, 0);
+  if (address == MAP_FAILED)
+  {
+    perror("Error with boundedbuffer mmap\n");
+    exit(EXIT_FAILURE);
+  }
+  
+  return address;
+}
+
+/**
+ *  General delete for a memory mapped pointer
+ */
+static void delete_mmap(void* address, size_t size)
+{
+  if (munmap(address, size) == -1) 
+  {
+    perror("Error deleting mmap");
+    exit(EXIT_FAILURE);
+  }
+}
+
+/**
+ *  Allocate a bounded buffer.
+ */
+BoundedBuffer* create_buffer()
+{
+  BoundedBuffer* buffer = (BoundedBuffer *)create_mmap(sizeof(BoundedBuffer));
+  sem_t* full = (sem_t *) create_mmap(sizeof(sem_t));
+  sem_t* empty = (sem_t *) create_mmap(sizeof(sem_t));
+  sem_t* mutex = (sem_t *) create_mmap(sizeof(sem_t));
+
+  sem_init(full, 1, 0);
+  sem_init(empty, 1, BUFFER_SIZE);
+  sem_init(mutex, 1, 1);
+
+  //Initialize nextIn, nextOut both to 0, set the size of the buffer
+  buffer->nextIn = 0;
+  buffer->nextOut = 0;
+  buffer->full = full;
+  buffer->empty = empty;
+  buffer->mutex = mutex;
+
+  return buffer;
+}
+
+/**
+ *  Destroy an allocated buffer
+ */
+void destroy_buffer(BoundedBuffer* buffer)
+{
+  assert(buffer != NULL);
+
+  delete_mmap(buffer->full, sizeof(sem_t));
+  delete_mmap(buffer->empty, sizeof(sem_t));
+  delete_mmap(buffer->mutex, sizeof(sem_t));
+
+  delete_mmap(buffer, sizeof(BoundedBuffer));
+}
+
+/**
+ *  Insert a character into the buffer
+ */
+void deposit(BoundedBuffer *buffer, const char c)
+{
+  assert(buffer != NULL);
+
+  sem_wait(buffer->empty);
+  //sem_wait(buffer->mutex); 
+
+  // Input the char into the buffer, and increment buffer counter
+  (buffer->buffer)[buffer->nextIn] = c;
+  buffer->nextIn = (buffer->nextIn + 1) % BUFFER_SIZE;
+
+  // Unlock the full buffer and mutual exclusion
+  //sem_post(buffer->mutex);
+  sem_post(buffer->full);
+}
+
+/**
+ *  Remove a character from the buffer
+ */
+char consume(BoundedBuffer* buffer)
+{
+  assert(buffer != NULL);
+  
+  char removed_char;
+ 
+  sem_wait(buffer->full);
+  //sem_wait(buffer->mutex);
+
+  removed_char = (buffer->buffer)[buffer->nextOut];
+  buffer->nextOut = (buffer->nextOut + 1) % BUFFER_SIZE;
+
+  //sem_post(buffer->mutex);
+  sem_post(buffer->empty);
+
+  return removed_char;
+}

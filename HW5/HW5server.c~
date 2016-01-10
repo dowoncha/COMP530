@@ -1,0 +1,171 @@
+#include <sys/types.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
+#include <assert.h>
+#include <string.h>
+
+#include "Socket.h"
+#include "HW5shared.h"
+
+ServerSocket welcome_socket;
+Socket connect_socket;
+
+void run_service();
+int read_line(char *line_data);
+void tokenize(char *line, char **argv);
+
+int main(int argc, char *argv[])
+{
+  pid_t currentPID, childPID;
+  int child_status;
+  char filename[50];
+
+  FILE *tmp;
+
+  //Argument 1: Welcoming port
+  if (argc < 2)
+  {
+    printf("No port specified\n");
+    exit(-1);
+  }
+
+  /* Create a welcome socket at the specified port */
+  welcome_socket = ServerSocket_new(atoi(argv[1]));
+  if (welcome_socket < 0)
+  {
+    printf("Failed new server socket\n");
+    exit(-1);
+  }
+
+  connect_socket = ServerSocket_accept(welcome_socket);
+  if (connect_socket < 0)
+  {
+    printf("Failed connect socket\n");
+    exit(-1);
+  }
+
+  /* Run until exited*/
+  while ( 1 )
+  {
+    currentPID = getpid();                  // Get PID of the Current Process
+    sprintf(filename, "tmp%d", currentPID); // Make file name from the current pid
+    tmp = freopen(filename, "w", stdout);         // Set stdout to the output file
+
+    childPID = fork();  //Child Process to read from client and execute
+    if (childPID < 0)
+    {
+      perror("fork");
+      exit(-1);
+    }
+    if (childPID == 0)
+    {
+      Socket_close(welcome_socket);
+      run_service();
+      Socket_close(connect_socket);
+      exit(0);
+    }
+    /* else
+    {
+      if (waitpid(-1, &child_status, 0) == -1)
+        perror("Wait error\n");
+      if (WIFSIGNALED(child_status) != 0)
+        printf("Child process ended becaues of signal %d\n", WTERMSIG(child_status));
+      else if (WIFEXITED(child_status) != 0)
+        printf("Child process ended normally, status = %d\n", WEXITSTATUS(child_status));
+      else
+        printf("Child process did not end normally\n");
+
+      fclose(tmp);
+      // Create a welcome socket at the specified port
+      FILE *output;
+      if ((output = fopen(filename, "r")) == NULL)
+	{
+	  printf("File open error\n");
+	  return;
+	}
+
+      int c, rc;
+      while ((c = getc(output)) != EOF)
+      {
+        rc = Socket_putc(c, connect_socket);
+        if (rc == EOF)
+        {
+          printf("Socket_putc EOF error\n");
+          break;
+        }
+      }
+
+      fclose(output);
+      Socket_close(connect_socket);
+    }*/
+  }
+}
+
+void run_service()
+{
+  char *argv[100];  //Hold arguments after parsing input line
+  char line[MAX_LINE];
+
+  //Does not use the server socket
+  Socket_close(welcome_socket);
+
+  while ( 1 )
+  {
+    if (read_line(line) == -1)    // Get a line from socket
+    {
+      printf("Read line error\n");
+      return;
+    }
+    // Tokenize the input line into argv array
+    // The first element in argv will hold the path name
+    tokenize(line, argv);
+    // Check if the file name is valid
+    if (execvp(*argv, argv) == -1 ) //Run the command in the arguments list
+    {
+      perror("Execvp");
+      exit(-1);
+    }
+  }
+}
+
+int read_line(char *line_data)
+{
+  int i, c, rc;
+  /* Read from the socket */
+  for (i = 0; i < MAX_LINE; ++i)
+  {
+    c = Socket_getc(connect_socket);
+    if (c == EOF)
+    {
+      printf("Socket_getc EOF or error\n");
+      return -1;
+    }
+
+    line_data[i] = c;
+    if (c == '\0')
+      break;
+  }
+
+  return 0;
+}
+
+/**
+ * This function will take a line of input and tokenize it into arguments and return a pointer to the arguments
+ * the delimitters used are space, tab, newline, and null values.
+ **/
+void tokenize(char *line, char **argv)
+{
+  assert(line != NULL);
+
+  //Grab first token from string this should be the command
+  *argv = strtok(line, " \t\n\0");
+  ++argv;
+  //This loop will run until we are out of arguments to add from the line
+  while ( *argv )
+    {
+      /* strtok requires every call after the first one to read NULL since the line is already stored*/
+      *argv++ = strtok(NULL, " \t\n\0");
+    }
+}

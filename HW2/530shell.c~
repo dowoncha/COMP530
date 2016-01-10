@@ -1,0 +1,118 @@
+/**
+ * Dowon Cha
+ * COMP 530 HW2
+ * This program is a simple Linux shell.
+ * Input: Read in a string with a file name to a command, and various arguments
+ * Output: Output result from the called command
+ * Honor Pledge: I pledge to not copy other people's crappy code.
+ **/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string.h>
+#include <assert.h>
+
+#define MAXLINELENGTH 1000
+#define MAXARGSIZE 80
+
+/**
+ * This function will take a line of input and tokenize it into arguments and return a pointer to the arguments
+ * the delimitters used are space, tab, newline, and null values. 
+ **/
+void tokenize(char *line, char **argv)
+{
+  assert(line != NULL);
+
+  /* Grab first token from string this should be the command */
+  *argv++ = strtok(line, " \t\n\0");
+  /** Run until no more tokens are found**/
+  while ( *argv )
+    {
+      /* strtok requires every call after the first one to read NULL since the line is already stored*/
+      *argv++ = strtok(NULL, " \t\n\0");
+    }
+}
+
+void check_valid_file(char *file)
+{
+  assert(file != NULL);
+  
+  struct stat sb;
+
+  if ( stat(file, &sb) < 0)
+    {
+      fprintf(stderr, "Stat error.");
+      exit(EXIT_FAILURE);
+    }
+
+  if (sb.st_mode == S_IFREG)
+    {
+      fprintf(stdin, "Regular file, okay.");
+    }
+  else
+    {
+      fprintf(stderr, "Not a regular file. ERROR");
+      exit(EXIT_FAILURE);
+    }
+}
+
+/**
+ * This function will take in an input string, tokenize it in a child process
+ * and then execute the input command
+ **/
+void run(char *line)
+{
+  pid_t pid;
+  char *argv[MAXARGSIZE];
+
+  /* Fork a child process*/
+  if ( (pid = fork()) < 0)
+    {
+      fprintf(stderr, "Fork Failed");
+      exit(EXIT_FAILURE);
+    }
+  else if (pid == 0)
+    {
+      /** Tokenize the input line into argv array **/
+      tokenize(line, argv);
+      /** Check if the input file name is valid **/
+      check_valid_file(*argv);
+      /** Exec the file_name with arguments argv **/
+      if (execvp(*argv, argv) == -1 )
+	{
+	  fprintf(stderr, "Execvp error");
+	  exit(EXIT_FAILURE);
+	}
+    }
+  else
+    {
+      /** Parent process should just wait for child to finish**/      
+      wait(NULL);
+    }
+}
+
+int main()
+{
+  /* Variable declarations  */
+  char line[MAXLINELENGTH];
+
+  //Run until done
+  while ( 1 )
+    {
+      /* Output prompt and read in a line*/
+      printf("%% ");
+      if (fgets(line, sizeof(line), stdin) == NULL)
+	{
+	  fprintf(stderr, "Input too long, or EOF");
+	  exit(EXIT_FAILURE);
+	}
+      
+      /** Tokenize input string in a child process and execute the command**/
+      run(line);
+    }
+
+  return 0;
+}
